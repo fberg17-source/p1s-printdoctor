@@ -2,13 +2,13 @@
   "expo": {
     "name": "PrintDoctor",
     "slug": "printdoctor",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#121212",
     "android": {
       "package": "no.graybeard.printdoctor",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#121212",
         "foregroundImage": "./assets/android-icon-foreground.png",

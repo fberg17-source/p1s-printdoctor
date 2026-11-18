@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -33,11 +33,13 @@ const DEFAULT_SLICER = {
   'Voron / Klipper': 'OrcaSlicer',
 };
 
-const MAX_IMAGE_WIDTH = 1280;
+const MAX_IMAGES = 3;
+const MAX_IMAGE_WIDTH = 1024;
 const REQUEST_TIMEOUT_MS = 60000;
+const MAX_HISTORY = 20;
 
 export default function App() {
-  const [image, setImage] = useState(null); // { uri, base64 }
+  const [images, setImages] = useState([]); // [{ uri, base64 }]
   const [brand, setBrand] = useState('Bambu Lab');
   const [model, setModel] = useState('');
   const [slicer, setSlicer] = useState('Bambu Studio');
@@ -46,11 +48,19 @@ export default function App() {
   const [plate, setPlate] = useState('Textured PEI');
   const [problem, setProblem] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [messages, setMessages] = useState([]); // [{ role: 'model' | 'user', text }]
+  const [followText, setFollowText] = useState('');
   const [errorMsg, setErrorMsg] = useState(null);
+  const scrollRef = useRef(null);
+
+  const scrollToEnd = () => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
 
   const pickImage = async (useCamera) => {
     setErrorMsg(null);
+    if (images.length >= MAX_IMAGES) {
+      setErrorMsg('Du kan ha maks ' + MAX_IMAGES + ' bilder.');
+      return;
+    }
     const permission = useCamera
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -69,28 +79,68 @@ export default function App() {
 
     const asset = pickerResult.assets[0];
     try {
-      // Skaler ned og komprimer slik at opplastingen holder seg godt under grensa til serveren
+      // Skaler ned og komprimer så opplastingen går fort også på dårlig nett
       const actions =
-        asset.width && asset.width > MAX_IMAGE_WIDTH
-          ? [{ resize: { width: MAX_IMAGE_WIDTH } }]
-          : [];
+        asset.width && asset.width > MAX_IMAGE_WIDTH ? [{ resize: { width: MAX_IMAGE_WIDTH } }] : [];
       const out = await ImageManipulator.manipulateAsync(asset.uri, actions, {
-        compress: 0.7,
+        compress: 0.6,
         format: ImageManipulator.SaveFormat.JPEG,
         base64: true,
       });
-      setImage({ uri: out.uri, base64: out.base64 });
-      setResult(null);
+      setImages((prev) => [...prev, { uri: out.uri, base64: out.base64 }].slice(0, MAX_IMAGES));
     } catch (e) {
       setErrorMsg('Kunne ikke behandle bildet: ' + (e.message || 'ukjent feil'));
     }
   };
 
+  const removeImage = (idx) => setImages((prev) => prev.filter((_, i) => i !== idx));
+
+  // Sender til serveren. Prøver én gang til automatisk ved nettverksbrudd.
+  const callServer = async (extra) => {
+    const payload = JSON.stringify({
+      brand,
+      model: model.trim(),
+      slicer,
+      filament,
+      nozzle,
+      plate,
+      problem: problem.trim(),
+      images: images.map((img) => ({ mimeType: 'image/jpeg', data: img.base64 })),
+      ...extra,
+    });
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-app-token': APP_TOKEN },
+          body: payload,
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const errText = data.error ? data.error : 'Serveren svarte med feil, kode ' + response.status;
+          throw Object.assign(new Error(errText), { fromServer: true });
+        }
+        if (!data.text) throw Object.assign(new Error('Fikk ikke noe svar fra AI-en.'), { fromServer: true });
+        return data.text;
+      } catch (error) {
+        const networkError = !error.fromServer && error.name !== 'AbortError';
+        if (attempt < 2 && networkError) continue;
+        if (error.name === 'AbortError') throw new Error('Tidsavbrudd – AI-en brukte for lang tid. Prøv igjen.');
+        if (networkError) throw new Error('Mistet nettforbindelsen. Sjekk nettet og prøv igjen.');
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  };
+
   const analyzePrint = async () => {
     setErrorMsg(null);
-    setResult(null);
-
-    if (!problem.trim() && !image) {
+    if (!problem.trim() && images.length === 0) {
       setErrorMsg('Ta et bilde eller skriv hva som skjedde med utskriften først.');
       return;
     }
@@ -98,49 +148,52 @@ export default function App() {
       setErrorMsg('Appen mangler serveroppsett (EXPO_PUBLIC_API_URL / EXPO_PUBLIC_APP_TOKEN).');
       return;
     }
-
     setLoading(true);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
+    setMessages([]);
     try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-app-token': APP_TOKEN,
-        },
-        body: JSON.stringify({
-          brand,
-          model: model.trim(),
-          slicer,
-          filament,
-          nozzle,
-          plate,
-          problem: problem.trim(),
-          image: image ? { mimeType: 'image/jpeg', data: image.base64 } : null,
-        }),
-        signal: controller.signal,
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const errText = data.error ? data.error : 'Serveren svarte med feil, kode ' + response.status;
-        throw new Error(errText);
-      }
-      if (!data.text) throw new Error('Fikk ikke noe svar fra AI-en.');
-
-      setResult(data.text);
+      const text = await callServer({});
+      setMessages([{ role: 'model', text }]);
+      scrollToEnd();
     } catch (error) {
-      const msg =
-        error.name === 'AbortError'
-          ? 'Tidsavbrudd – AI-en brukte for lang tid. Prøv igjen.'
-          : error.message || 'Kunne ikke koble til AI.';
-      setErrorMsg('Feil: ' + msg);
+      setErrorMsg('Feil: ' + (error.message || 'Kunne ikke koble til AI.'));
     } finally {
-      clearTimeout(timer);
       setLoading(false);
     }
+  };
+
+  const sendFollowup = async () => {
+    const q = followText.trim();
+    if (!q || loading) return;
+    if (messages.length + 2 > MAX_HISTORY) {
+      setErrorMsg('Samtalen er blitt lang. Trykk «Ny analyse» for å starte på nytt.');
+      return;
+    }
+    setErrorMsg(null);
+    setLoading(true);
+    const history = messages;
+    setMessages([...history, { role: 'user', text: q }]);
+    setFollowText('');
+    scrollToEnd();
+    try {
+      const text = await callServer({ history, followup: q });
+      setMessages([...history, { role: 'user', text: q }, { role: 'model', text }]);
+      scrollToEnd();
+    } catch (error) {
+      setMessages(history);
+      setFollowText(q);
+      setErrorMsg('Feil: ' + (error.message || 'Kunne ikke koble til AI.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const newAnalysis = () => {
+    setMessages([]);
+    setFollowText('');
+    setProblem('');
+    setImages([]);
+    setErrorMsg(null);
+    setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
   };
 
   const renderSelector = (title, options, selected, onSelect) => (
@@ -153,9 +206,7 @@ export default function App() {
             style={[styles.chip, selected === item && styles.chipActive]}
             onPress={() => onSelect(item)}
           >
-            <Text style={[styles.chipText, selected === item && styles.chipTextActive]}>
-              {item}
-            </Text>
+            <Text style={[styles.chipText, selected === item && styles.chipTextActive]}>{item}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -165,29 +216,37 @@ export default function App() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.header}>PrintDoctor</Text>
         <Text style={styles.subHeader}>AI-hjelp for 3D-utskrifter – alle printere og slicere</Text>
 
         <View style={styles.imageBox}>
-          {image ? (
-            <>
-              <Image source={{ uri: image.uri }} style={styles.previewImage} resizeMode="contain" />
-              <TouchableOpacity onPress={() => setImage(null)}>
-                <Text style={styles.removeText}>Fjern bilde</Text>
-              </TouchableOpacity>
-            </>
+          {images.length > 0 ? (
+            <View style={styles.thumbRow}>
+              {images.map((img, i) => (
+                <View key={img.uri} style={styles.thumbWrap}>
+                  <Image source={{ uri: img.uri }} style={styles.thumb} />
+                  <TouchableOpacity style={styles.thumbRemove} onPress={() => removeImage(i)}>
+                    <Text style={styles.thumbRemoveText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
           ) : (
-            <Text style={styles.placeholderText}>Ingen bilde valgt ennå</Text>
+            <Text style={styles.placeholderText}>
+              Ta 1–3 bilder: helheten, nærbilde av feilen og gjerne fra siden
+            </Text>
           )}
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.secButton} onPress={() => pickImage(true)}>
-              <Text style={styles.secButtonText}>Ta bilde</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secButton} onPress={() => pickImage(false)}>
-              <Text style={styles.secButtonText}>Velg bilde</Text>
-            </TouchableOpacity>
-          </View>
+          {images.length < MAX_IMAGES && (
+            <View style={styles.buttonRow}>
+              <TouchableOpacity style={styles.secButton} onPress={() => pickImage(true)}>
+                <Text style={styles.secButtonText}>Ta bilde</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secButton} onPress={() => pickImage(false)}>
+                <Text style={styles.secButtonText}>Velg bilde</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {renderSelector('Printer', BRANDS, brand, (b) => {
@@ -227,25 +286,65 @@ export default function App() {
           onPress={analyzePrint}
           disabled={loading}
         >
-          {loading ? (
+          {loading && messages.length === 0 ? (
             <ActivityIndicator color="#000" />
           ) : (
-            <Text style={styles.mainButtonText}>Analyser med AI</Text>
+            <Text style={styles.mainButtonText}>{messages.length ? 'Analyser på nytt' : 'Analyser med AI'}</Text>
           )}
         </TouchableOpacity>
+
+        {messages.length > 0 && (
+          <View style={styles.chat}>
+            {messages.map((m, i) =>
+              m.role === 'model' ? (
+                <View key={i} style={styles.resultBox}>
+                  {i === 0 && <Text style={styles.resultTitle}>Diagnose og tiltak</Text>}
+                  <Text style={styles.resultText} selectable>
+                    {m.text}
+                  </Text>
+                </View>
+              ) : (
+                <View key={i} style={styles.userBubble}>
+                  <Text style={styles.userText}>{m.text}</Text>
+                </View>
+              ),
+            )}
+
+            {loading && (
+              <View style={styles.thinking}>
+                <ActivityIndicator color="#00AE42" />
+                <Text style={styles.thinkingText}>AI-en tenker …</Text>
+              </View>
+            )}
+
+            <Text style={styles.label}>Spør videre</Text>
+            <TextInput
+              style={[styles.input, styles.inputFollow]}
+              placeholder="F.eks. Hva om det ikke hjelper? Hvor finner jeg det i Cura?"
+              placeholderTextColor="#777"
+              multiline
+              maxLength={1000}
+              value={followText}
+              onChangeText={setFollowText}
+            />
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={[styles.mainButton, styles.flex1, (loading || !followText.trim()) && styles.disabledButton]}
+                onPress={sendFollowup}
+                disabled={loading || !followText.trim()}
+              >
+                <Text style={styles.mainButtonText}>Send</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.secButton, styles.newButton]} onPress={newAnalysis}>
+                <Text style={styles.secButtonText}>Ny analyse</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {errorMsg && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{errorMsg}</Text>
-          </View>
-        )}
-
-        {result && (
-          <View style={styles.resultBox}>
-            <Text style={styles.resultTitle}>Anbefalte tiltak og innstillinger:</Text>
-            <Text style={styles.resultText} selectable>
-              {result}
-            </Text>
           </View>
         )}
       </ScrollView>
@@ -254,6 +353,36 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  thumbRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  thumbWrap: { position: 'relative' },
+  thumb: { width: 90, height: 90, borderRadius: 8 },
+  thumbRemove: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#FF5555',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbRemoveText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  chat: { marginTop: 8 },
+  userBubble: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#2C2C2C',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
+    maxWidth: '85%',
+  },
+  userText: { color: '#FFF', fontSize: 14 },
+  thinking: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  thinkingText: { color: '#AAA' },
+  inputFollow: { minHeight: 60, marginBottom: 10 },
+  flex1: { flex: 1, marginTop: 0 },
+  newButton: { justifyContent: 'center' },
   container: {
     flex: 1,
     backgroundColor: '#121212',
@@ -273,7 +402,7 @@ const styles = StyleSheet.create({
   },
   previewImage: { width: '100%', height: 220, borderRadius: 8, marginBottom: 8 },
   removeText: { color: '#FF7777', marginBottom: 12, fontSize: 13 },
-  placeholderText: { color: '#777', marginVertical: 40 },
+  placeholderText: { color: '#777', marginVertical: 30, textAlign: 'center' },
   buttonRow: { flexDirection: 'row', gap: 10 },
   secButton: {
     backgroundColor: '#2C2C2C',
@@ -329,7 +458,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A241E',
     borderRadius: 12,
     padding: 16,
-    marginTop: 24,
+    marginTop: 14,
     borderWidth: 1,
     borderColor: '#00AE42',
   },

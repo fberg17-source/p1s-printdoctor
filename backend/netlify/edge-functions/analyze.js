@@ -22,16 +22,33 @@ const ALLOWED = {
 };
 const MAX_MODEL_CHARS = 60;
 const MAX_PROBLEM_CHARS = 1000;
-const MAX_IMAGE_BASE64_CHARS = 4_000_000; // ca. 3 MB bilde; Netlify-grensa er 6 MB per forespørsel
+const MAX_IMAGE_BASE64_CHARS = 4_000_000; // per bilde
+const MAX_TOTAL_IMAGE_CHARS = 5_000_000; // alle bilder samlet
+const MAX_IMAGES = 3;
+const MAX_HISTORY = 20; // meldinger i samtalen
+const MAX_HISTORY_CHARS = 8000; // per melding
+const MAX_FOLLOWUP_CHARS = 1000;
 
-const SYSTEM_PROMPT = `Du er en ekspert på FDM 3D-printing og kjenner alle vanlige printere (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Qidi, Sovol, Voron/Klipper m.fl.) og slicere (Bambu Studio, OrcaSlicer, PrusaSlicer, Cura, Creality Print).
-Du får brukerens printer, slicer, filament, dyse og byggeplate, en beskrivelse og eventuelt et bilde av utskriften.
-Tilpass rådene til akkurat den printeren og sliceren: bruk slicerens egne navn på innstillingene og menyene, og ta hensyn til om printeren har lukket kammer, direct drive eller bowden, auto-nivellering osv. Er modellen ukjent, gi råd som passer bredt og si hva som avhenger av printeren.
-Svar kort og konkret på norsk, i ren tekst uten markdown (ingen **, #, eller tabeller).
-Strukturer svaret slik:
-1. DIAGNOSE (1–2 setninger. Hvis bildet viser noe annet enn beskrivelsen, si det.)
-2. SLICER-INNSTILLINGER (eksakte verdier og hvor i sliceren de ligger)
-3. FYSISK SJEKK PÅ PRINTEREN (f.eks. rengjør plata, kjøling, dyse, tørk filament, nivellering, beltestramming)
+const SYSTEM_PROMPT = `Du er en erfaren ekspert på FDM 3D-printing og kjenner alle vanlige printere (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Qidi, Sovol, Voron/Klipper m.fl.) og slicere (Bambu Studio, OrcaSlicer, PrusaSlicer, Cura, Creality Print).
+Du får brukerens printer, slicer, filament, dyse og byggeplate, en beskrivelse og ofte ett til tre bilder av utskriften.
+
+Slik vurderer du bildene:
+- Se nøye etter konkrete kjennetegn: lagforskyvning, under-/overekstrudering, stringing, blobs/zits, warping/løftede hjørner, elefantfot, ringing/ghosting, dårlig brobygging, overheng som henger, lag som sprekker (dårlig lagheft), spaghetti, Z-banding, hull i toppflater, dårlig første lag.
+- Beskriv hvor på objektet du ser feilen (f.eks. "fra ca. halve høyden", "på overhenget til venstre").
+- Skill mellom det du faktisk ser og det du antar. Er bildet uklart, for langt unna eller viser noe annet enn beskrivelsen: si det, og si hvilket bilde som ville hjulpet (nærbilde, fra siden, undersiden).
+- Ranger de mest sannsynlige årsakene, mest sannsynlig først.
+
+Tilpass rådene til akkurat den printeren og sliceren: bruk slicerens egne navn på innstillingene og menyene, og ta hensyn til lukket kammer, direct drive eller bowden, auto-nivellering, Klipper/Marlin osv. Er modellen ukjent, gi råd som passer bredt og si hva som avhenger av printeren.
+Svar konkret på norsk, i ren tekst uten markdown (ingen **, #, eller tabeller).
+
+FØRSTE SVAR i en samtale skal ha denne strukturen:
+1. DIAGNOSE (hva du ser, hvor, og hvor sikker du er)
+2. SANNSYNLIGE ÅRSAKER (mest sannsynlig først)
+3. SLICER-INNSTILLINGER (eksakte verdier og hvor i sliceren de ligger)
+4. FYSISK SJEKK PÅ PRINTEREN
+5. TEST FØRST (det ene enkleste tiltaket å prøve først)
+
+OPPFØLGINGSSPØRSMÅL: svar direkte og kort på det brukeren spør om, uten å gjenta hele strukturen. Husk hva som er sagt tidligere i samtalen.
 Hvis bildet ikke viser en 3D-utskrift, eller du er usikker, si det heller enn å gjette.`;
 
 const CORS = {
@@ -62,7 +79,7 @@ const handler = async (req) => {
     return json({ error: 'Ugyldig forespørsel.' }, 400);
   }
 
-  const { filament, nozzle, plate, image } = body || {};
+  const { filament, nozzle, plate } = body || {};
   // Eldre app-versjoner sender ikke printer/slicer – da antas Bambu Lab P1S.
   const brand = body?.brand ?? 'Bambu Lab';
   const slicer = body?.slicer ?? 'Bambu Studio';
@@ -77,14 +94,34 @@ const handler = async (req) => {
   }
   if (problem.length > MAX_PROBLEM_CHARS) return json({ error: 'Beskrivelsen er for lang.' }, 400);
 
-  let imagePart = null;
-  if (image) {
-    if (image.mimeType !== 'image/jpeg' || typeof image.data !== 'string' || !image.data) {
+  // Bilder: ny app sender images[], eldre app sender image.
+  const rawImages = Array.isArray(body?.images) ? body.images : body?.image ? [body.image] : [];
+  if (rawImages.length > MAX_IMAGES) return json({ error: 'Maks ' + MAX_IMAGES + ' bilder.' }, 400);
+  const imageParts = [];
+  let totalChars = 0;
+  for (const img of rawImages) {
+    if (!img || img.mimeType !== 'image/jpeg' || typeof img.data !== 'string' || !img.data) {
       return json({ error: 'Ugyldig bilde.' }, 400);
     }
-    if (image.data.length > MAX_IMAGE_BASE64_CHARS) return json({ error: 'Bildet er for stort.' }, 413);
-    imagePart = { inline_data: { mime_type: 'image/jpeg', data: image.data } };
+    if (img.data.length > MAX_IMAGE_BASE64_CHARS) return json({ error: 'Bildet er for stort.' }, 413);
+    totalChars += img.data.length;
+    imageParts.push({ inline_data: { mime_type: 'image/jpeg', data: img.data } });
   }
+  if (totalChars > MAX_TOTAL_IMAGE_CHARS) return json({ error: 'Bildene er for store til sammen.' }, 413);
+  const imagePart = imageParts[0] || null;
+
+  // Samtale: tidligere meldinger + nytt oppfølgingsspørsmål
+  const followup = typeof body?.followup === 'string' ? body.followup.trim() : '';
+  if (followup.length > MAX_FOLLOWUP_CHARS) return json({ error: 'Spørsmålet er for langt.' }, 400);
+  const history = Array.isArray(body?.history) ? body.history : [];
+  if (history.length > MAX_HISTORY) return json({ error: 'Samtalen er for lang. Start en ny analyse.' }, 400);
+  for (const m of history) {
+    if (!m || !['user', 'model'].includes(m.role) || typeof m.text !== 'string' || m.text.length > MAX_HISTORY_CHARS) {
+      return json({ error: 'Ugyldig samtalehistorikk.' }, 400);
+    }
+  }
+  if (followup && history.length === 0) return json({ error: 'Oppfølging krever et tidligere svar.' }, 400);
+
   if (!problem && !imagePart) return json({ error: 'Send et bilde eller en beskrivelse.' }, 400);
 
   // Enkel dagsgrense for hele tjenesten, så en lekket token ikke kan gi en stor regning.
@@ -106,8 +143,13 @@ const handler = async (req) => {
     `Filament: ${filament}. Dyse: ${nozzle}. Byggeplate: ${plate}.\n` +
     `Brukerens beskrivelse: ${problem || '(ingen – vurder bildet)'}`;
 
-  const parts = [{ text: userText }];
-  if (imagePart) parts.push(imagePart);
+  const parts = [{ text: userText }, ...imageParts];
+  // Første melding er alltid oppsett + bilder; deretter samtalen og evt. nytt spørsmål.
+  const contents = [{ role: 'user', parts }];
+  if (followup) {
+    for (const m of history) contents.push({ role: m.role, parts: [{ text: m.text }] });
+    contents.push({ role: 'user', parts: [{ text: followup }] });
+  }
 
   // Prøv hovedmodellen først. Er den overbelastet (503/429/500) eller treg, prøv en lettere modell.
   const primary = Netlify.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
@@ -127,7 +169,7 @@ const handler = async (req) => {
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: [{ role: 'user', parts }],
+            contents,
             generationConfig: {
               temperature: 0.4,
               maxOutputTokens: 4096,
