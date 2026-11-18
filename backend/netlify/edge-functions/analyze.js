@@ -41,7 +41,7 @@ const json = (obj, status = 200) =>
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS },
   });
 
-export default async (req) => {
+const handler = async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return json({ error: 'Kun POST er tillatt.' }, 405);
 
@@ -96,37 +96,63 @@ export default async (req) => {
   const parts = [{ text: userText }];
   if (imagePart) parts.push(imagePart);
 
-  const model = Netlify.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  // Prøv hovedmodellen først. Er den overbelastet (503/429/500) eller treg, prøv en lettere modell.
+  const primary = Netlify.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
+  const models = [...new Set([primary, 'gemini-flash-lite-latest'])];
+  const started = Date.now();
+  const TOTAL_BUDGET_MS = 36000; // edge-funksjonen må svare innen ca. 40 s
 
-  const callGemini = (withThinking) =>
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts }],
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: 4096,
-          // Lite "tenking" gir raskere svar. Faller tilbake uten hvis modellen ikke støtter det.
-          ...(withThinking ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+  const callGemini = async (model, withThinking, timeoutMs) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts }],
+            generationConfig: {
+              temperature: 0.4,
+              maxOutputTokens: 4096,
+              ...(withThinking ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+            },
+          }),
         },
-      }),
-    });
+      );
+    } finally {
+      clearTimeout(t);
+    }
+  };
 
-  let geminiRes;
-  try {
-    geminiRes = await callGemini(true);
-    if (geminiRes.status === 400) geminiRes = await callGemini(false);
-  } catch {
-    return json({ error: 'Fikk ikke kontakt med AI-tjenesten.' }, 502);
+  let geminiRes = null;
+  let data = null;
+  let lastErr = 'ukjent';
+  for (let i = 0; i < models.length; i++) {
+    const left = TOTAL_BUDGET_MS - (Date.now() - started);
+    if (left < 4000) break;
+    // Gi hovedmodellen mesteparten av tida, men la det være igjen til reserven.
+    const timeoutMs = i === 0 && models.length > 1 ? Math.min(22000, left - 10000) : left;
+    try {
+      geminiRes = await callGemini(models[i], true, timeoutMs);
+      if (geminiRes.status === 400) geminiRes = await callGemini(models[i], false, Math.max(3000, TOTAL_BUDGET_MS - (Date.now() - started)));
+      data = await geminiRes.json().catch(() => null);
+      if (geminiRes.ok) break;
+      lastErr = geminiRes.status + ' ' + (data?.error?.message || '').slice(0, 140);
+      console.error('Gemini-feil', models[i], lastErr);
+      if (![429, 500, 503, 504, 404].includes(geminiRes.status)) break;
+    } catch (e) {
+      lastErr = e?.name === 'AbortError' ? 'tidsavbrudd hos ' + models[i] : 'nettverksfeil';
+      console.error('Gemini-kall feilet', models[i], lastErr);
+      geminiRes = null;
+    }
   }
 
-  const data = await geminiRes.json().catch(() => null);
-  if (!geminiRes.ok) {
-    console.error('Gemini-feil', geminiRes.status, JSON.stringify(data)?.slice(0, 500));
-    return json({ error: 'AI-tjenesten svarte med feil (' + geminiRes.status + ').' }, 502);
+  if (!geminiRes || !geminiRes.ok) {
+    return json({ error: 'AI-tjenesten svarte med feil: ' + lastErr }, 502);
   }
 
   const text = (data?.candidates?.[0]?.content?.parts || [])
@@ -140,6 +166,15 @@ export default async (req) => {
   }
 
   return json({ text });
+};
+
+export default async (req) => {
+  try {
+    return await handler(req);
+  } catch (e) {
+    console.error('Uventet feil', e);
+    return json({ error: 'Uventet serverfeil: ' + String(e?.message || e).slice(0, 160) }, 500);
+  }
 };
 
 export const config = { path: '/api/analyze' };
