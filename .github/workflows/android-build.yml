@@ -44,12 +44,19 @@ jobs:
           [ -n "$EXPO_TOKEN" ] || { echo "::error::Mangler secret EXPO_TOKEN"; exit 1; }
           [ -n "$APP_TOKEN" ] || { echo "::error::Mangler secret APP_TOKEN"; exit 1; }
 
-      - name: Lag .env for appen
+      - name: Legg server-adresse og token inn i bygget
         env:
           APP_TOKEN: ${{ secrets.APP_TOKEN }}
+        # Skrives inn i eas.json (bare her i byggejobben, committes ikke).
+        # .env-filer blir ikke med til EAS fordi de står i .gitignore.
         run: |
-          echo "EXPO_PUBLIC_API_URL=https://p1s-printdoctor-graybeard.netlify.app/api/analyze" > .env
-          echo "EXPO_PUBLIC_APP_TOKEN=$APP_TOKEN" >> .env
+          node -e "
+            const fs=require('fs');const e=JSON.parse(fs.readFileSync('eas.json','utf8'));
+            const env={EXPO_PUBLIC_API_URL:'https://p1s-printdoctor-graybeard.netlify.app/api/analyze',EXPO_PUBLIC_APP_TOKEN:process.env.APP_TOKEN};
+            for (const k of Object.keys(e.build)) e.build[k].env={...(e.build[k].env||{}),...env};
+            fs.writeFileSync('eas.json',JSON.stringify(e,null,2));
+          "
+          echo "eas.json oppdatert for profilene: $(node -e "console.log(Object.keys(require('./eas.json').build).join(', '))")"
 
       - name: Installer
         run: npm install --no-audit --no-fund
