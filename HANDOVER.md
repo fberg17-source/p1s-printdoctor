@@ -117,3 +117,18 @@ Se README.md: `netlify init`/`deploy`, `npm install` i `app/`, deretter `eas ini
 - [ ] Personvernerklæring (norsk og engelsk) og svar til Data safety-skjemaet
 - [ ] Play-utviklerkonto, lukket test med 12 testere i 14 dager
 - [ ] Valgfritt: Markdown-visning av svaret, lagre tidligere analyser lokalt, grense per enhet i tillegg til den totale
+
+## Status 18.11.2026 (kveld)
+
+- **Appen heter nå PrintDoctor** og støtter alle printere og slicere (merke, modell, slicer). Pakkenavn `no.graybeard.printdoctor`, versjon 1.1.0 (versionCode 2).
+- **Backend:** Netlify-prosjekt `p1s-printdoctor-graybeard` → `https://p1s-printdoctor-graybeard.netlify.app/api/analyze`. Kjører som **edge-funksjon** (`backend/netlify/edge-functions/analyze.js`) fordi vanlige funksjoner stoppes etter 10 s på gratisplanen. Modell `gemini-flash-latest` med reserve `gemini-flash-lite-latest`. Env-variabler: `GEMINI_API_KEY`, `APP_TOKEN`.
+- **v1.1:** oppfølgingschat (history + followup), opptil 3 bilder, grundigere diagnose (årsaker rangert + «test først»), automatisk nytt forsøk ved nettbrudd.
+- **Bygging:** GitHub Actions (`.github/workflows/android-build.yml`) bygger APK **lokalt på GitHub-runneren** med `eas build --local` ved hver endring i `app/` (ca. 12 min, ingen Expo-kø). Secrets i GitHub: `EXPO_TOKEN`, `APP_TOKEN`. API-adresse og token skrives inn i `eas.json` under bygget (ikke committet). Expo-prosjekt: `@graybeard/printdoctor`.
+- **Alltid nyeste APK:** https://github.com/fberg17-source/p1s-printdoctor/releases/latest/download/PrintDoctor.apk
+- **Produksjonsbygg (AAB til Play):** GitHub → Actions → «Bygg Android-app» → Run workflow → profil `production`.
+
+### Neste steg
+1. Frank tester v1.1 (chat og flere bilder) på telefonen.
+2. Personvernerklæring + Data safety-skjema.
+3. Google Play Console: konto, intern testing, 12 testere i 14 dager, så produksjon.
+4. Mulige funksjoner senere: filament fra tredjeparter, oversette innstillinger mellom slicere, lagrede printere/historikk, engelsk språk.
