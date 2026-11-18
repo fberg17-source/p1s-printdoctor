@@ -84,6 +84,7 @@ jobs:
             echo "- Nedlasting: $URL"
           } > builds/LATEST.md
           echo "Nedlasting: $URL" >> "$GITHUB_STEP_SUMMARY"
+          git checkout -- app   # eas init endrer app.json under bygget; ikke commit det
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add builds/LATEST.md
