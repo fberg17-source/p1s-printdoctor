@@ -1,12 +1,12 @@
-# Overlevering – P1S PrintDoctor
+# Overlevering – PrintDoctor
 
 *Oppdatert 17.11.2026. Erstatter den forrige overleveringen, som hadde feil om hvordan appen virket.*
 
 ## 1. Hva appen er
 
-- **Navn:** P1S PrintDoctor
-- **Formål:** AI-assistent for feilsøking på Bambu Lab P1S med AMS og Bambu Studio. Brukeren tar bilde av utskriften og velger filament, dyse og byggeplate. Så kommer et kort svar på norsk i tre deler: diagnose, Bambu Studio-innstillinger og fysisk sjekk.
-- **Pakkenavn (Android):** `no.graybeard.p1sprintdoctor`
+- **Navn:** PrintDoctor
+- **Formål:** AI-assistent for feilsøking på 3D-utskrifter for alle vanlige printere og slicere. Brukeren tar bilde av utskriften og velger printer (merke + valgfri modell), slicer, filament, dyse og byggeplate. Så kommer et kort svar på norsk i tre deler: diagnose, slicer-innstillinger og fysisk sjekk. (Startet som P1S-app; generalisert 18.11.2026. Netlify-prosjektet heter fortsatt p1s-printdoctor-graybeard og repoet p1s-printdoctor.)
+- **Pakkenavn (Android):** `no.graybeard.printdoctor`
 - **Kontoer:** Expo `@graybeard`, Google AI Studio (Gemini-nøkkel), Netlify (samme konto som chibinichi.no)
 
 ## 2. Hva som var galt i Snack-versjonen
@@ -78,7 +78,7 @@ Krever at koden ligger i et GitHub-repo, for eksempel privat `fberg17-source/p1s
    - `APP_TOKEN`: en lang tilfeldig streng, gjerne fra en passordgenerator med 40 tegn eller mer
    - `DAILY_LIMIT`: 200 (valgfri)
 4. Kjør *Deploys → Trigger deploy*. Noter adressen, for eksempel `https://p1s-printdoctor-api.netlify.app`.
-5. Sjekk at forsiden viser «P1S PrintDoctor API».
+5. Sjekk at forsiden viser «PrintDoctor API».
 
 **C. Rask test i Snack (uten å bygge)**
 1. Lim inn den nye `App.js` i Snacken.
@@ -87,7 +87,7 @@ Krever at koden ligger i et GitHub-repo, for eksempel privat `fberg17-source/p1s
 4. Test i Expo Go med bilde og tekst.
 
 **D. Bygg på expo.dev (nettleser)**
-1. Lag prosjektet `p1s-printdoctor` på expo.dev under `@graybeard` og koble det til GitHub-repoet (*Project settings → GitHub*). Sett base-mappe til `app`.
+1. Lag prosjektet `printdoctor` på expo.dev under `@graybeard` og koble det til GitHub-repoet (*Project settings → GitHub*). Sett base-mappe til `app`.
 2. Legg inn disse under *Environment variables*, for både *preview* og *production*:
    - `EXPO_PUBLIC_API_URL` = `https://DITT-SITENAVN.netlify.app/api/analyze`
    - `EXPO_PUBLIC_APP_TOKEN` = samme verdi som `APP_TOKEN`

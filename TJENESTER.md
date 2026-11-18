@@ -1,4 +1,4 @@
-# P1S PrintDoctor – tjenester og kontoer
+# PrintDoctor – tjenester og kontoer
 
 *17.11.2026. Denne lista erstatter den fra den andre AI-en. Supabase, Firebase og Pollinations brukes ikke.*
 

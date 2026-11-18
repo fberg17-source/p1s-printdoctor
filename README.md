@@ -1,6 +1,6 @@
-# P1S PrintDoctor
+# PrintDoctor
 
-Appen er en AI-assistent for feilsøking på Bambu Lab P1S med AMS. Den sender oppsett, beskrivelse og bilde til en egen Netlify Function. Funksjonen kaller Google Gemini, og API-nøkkelen ligger bare der, aldri i appen.
+Appen er en AI-assistent for feilsøking på 3D-utskrifter for alle vanlige FDM-printere og slicere (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Qidi, Sovol, Voron m.fl.). Den sender oppsett, beskrivelse og bilde til en egen Netlify Function. Funksjonen kaller Google Gemini, og API-nøkkelen ligger bare der, aldri i appen.
 
 ```
 app/        Expo-appen (App.js, app.json, eas.json, .env.example)

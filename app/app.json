@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "P1S PrintDoctor",
-    "slug": "p1s-printdoctor",
+    "name": "PrintDoctor",
+    "slug": "printdoctor",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#121212",
     "android": {
-      "package": "no.graybeard.p1sprintdoctor",
+      "package": "no.graybeard.printdoctor",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#121212",

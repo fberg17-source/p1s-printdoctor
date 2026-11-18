@@ -19,15 +19,28 @@ import * as ImageManipulator from 'expo-image-manipulator';
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const APP_TOKEN = process.env.EXPO_PUBLIC_APP_TOKEN;
 
-const FILAMENTS = ['PLA', 'PETG', 'ABS / ASA', 'TPU', 'PAHT-CF'];
+const BRANDS = ['Bambu Lab', 'Prusa', 'Creality', 'Elegoo', 'Anycubic', 'Qidi', 'Sovol', 'Voron / Klipper', 'Annen'];
+const SLICERS = ['Bambu Studio', 'OrcaSlicer', 'PrusaSlicer', 'Cura', 'Creality Print', 'Annen'];
+const FILAMENTS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'Nylon / PA', 'PC', 'Karbonfiber-blanding', 'Annet'];
 const NOZZLES = ['0.4 mm', '0.2 mm', '0.6 mm', '0.8 mm'];
-const PLATES = ['Textured PEI', 'Smooth PEI', 'Cool Plate / Supertack'];
+const PLATES = ['Textured PEI', 'Smooth PEI', 'Glass', 'Cool Plate / Supertack', 'Annet'];
+// Foreslått slicer når man velger merke (kan endres etterpå)
+const DEFAULT_SLICER = {
+  'Bambu Lab': 'Bambu Studio',
+  Prusa: 'PrusaSlicer',
+  Creality: 'Creality Print',
+  Qidi: 'OrcaSlicer',
+  'Voron / Klipper': 'OrcaSlicer',
+};
 
 const MAX_IMAGE_WIDTH = 1280;
 const REQUEST_TIMEOUT_MS = 60000;
 
 export default function App() {
   const [image, setImage] = useState(null); // { uri, base64 }
+  const [brand, setBrand] = useState('Bambu Lab');
+  const [model, setModel] = useState('');
+  const [slicer, setSlicer] = useState('Bambu Studio');
   const [filament, setFilament] = useState('PLA');
   const [nozzle, setNozzle] = useState('0.4 mm');
   const [plate, setPlate] = useState('Textured PEI');
@@ -98,6 +111,9 @@ export default function App() {
           'x-app-token': APP_TOKEN,
         },
         body: JSON.stringify({
+          brand,
+          model: model.trim(),
+          slicer,
           filament,
           nozzle,
           plate,
@@ -109,7 +125,8 @@ export default function App() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.error || 'Serveren svarte med feil (' + response.status + ').');
+        const errText = data.error ? data.error : 'Serveren svarte med feil, kode ' + response.status;
+        throw new Error(errText);
       }
       if (!data.text) throw new Error('Fikk ikke noe svar fra AI-en.');
 
@@ -149,8 +166,8 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.header}>P1S PrintDoctor</Text>
-        <Text style={styles.subHeader}>AI-assistent for Bambu Lab P1S & Bambu Studio</Text>
+        <Text style={styles.header}>PrintDoctor</Text>
+        <Text style={styles.subHeader}>AI-hjelp for 3D-utskrifter – alle printere og slicere</Text>
 
         <View style={styles.imageBox}>
           {image ? (
@@ -173,6 +190,21 @@ export default function App() {
           </View>
         </View>
 
+        {renderSelector('Printer', BRANDS, brand, (b) => {
+          setBrand(b);
+          if (DEFAULT_SLICER[b]) setSlicer(DEFAULT_SLICER[b]);
+        })}
+        <View style={styles.section}>
+          <TextInput
+            style={[styles.input, styles.inputSmall]}
+            placeholder="Modell (valgfritt), f.eks. P1S, Ender-3 Pro, MK4"
+            placeholderTextColor="#777"
+            maxLength={60}
+            value={model}
+            onChangeText={setModel}
+          />
+        </View>
+        {renderSelector('Slicer', SLICERS, slicer, setSlicer)}
         {renderSelector('Filament', FILAMENTS, filament, setFilament)}
         {renderSelector('Dysestørrelse', NOZZLES, nozzle, setNozzle)}
         {renderSelector('Byggeplate', PLATES, plate, setPlate)}
@@ -210,7 +242,7 @@ export default function App() {
 
         {result && (
           <View style={styles.resultBox}>
-            <Text style={styles.resultTitle}>Anbefalte tiltak & Bambu Studio-innstillinger:</Text>
+            <Text style={styles.resultTitle}>Anbefalte tiltak og innstillinger:</Text>
             <Text style={styles.resultText} selectable>
               {result}
             </Text>
@@ -281,6 +313,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
   },
+  inputSmall: { minHeight: 0, paddingVertical: 10 },
   disabledButton: { opacity: 0.6 },
   mainButtonText: { color: '#000', fontSize: 16, fontWeight: 'bold' },
   errorBox: {

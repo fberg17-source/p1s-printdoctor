@@ -1,4 +1,4 @@
-// Netlify Edge Function: proxy mellom P1S PrintDoctor-appen og Google Gemini.
+// Netlify Edge Function: proxy mellom PrintDoctor-appen og Google Gemini.
 // API-nøkkelen ligger kun her (miljøvariabel GEMINI_API_KEY), aldri i appen.
 //
 // Miljøvariabler (Netlify → Site configuration → Environment variables):
@@ -13,20 +13,25 @@ import { getStore } from '@netlify/blobs';
 // mens edge-funksjoner kan vente på Gemini så lenge svaret starter innen ca. 40 s.
 
 const ALLOWED = {
-  filament: ['PLA', 'PETG', 'ABS / ASA', 'TPU', 'PAHT-CF'],
+  // Gamle verdier ('ABS / ASA', 'PAHT-CF') beholdes så eldre app-versjoner fortsatt virker.
+  filament: ['PLA', 'PETG', 'ABS', 'ASA', 'ABS / ASA', 'TPU', 'Nylon / PA', 'PC', 'Karbonfiber-blanding', 'PAHT-CF', 'Annet'],
   nozzle: ['0.4 mm', '0.2 mm', '0.6 mm', '0.8 mm'],
-  plate: ['Textured PEI', 'Smooth PEI', 'Cool Plate / Supertack'],
+  plate: ['Textured PEI', 'Smooth PEI', 'Glass', 'Cool Plate / Supertack', 'Annet'],
+  brand: ['Bambu Lab', 'Prusa', 'Creality', 'Elegoo', 'Anycubic', 'Qidi', 'Sovol', 'Voron / Klipper', 'Annen'],
+  slicer: ['Bambu Studio', 'OrcaSlicer', 'PrusaSlicer', 'Cura', 'Creality Print', 'Annen'],
 };
+const MAX_MODEL_CHARS = 60;
 const MAX_PROBLEM_CHARS = 1000;
 const MAX_IMAGE_BASE64_CHARS = 4_000_000; // ca. 3 MB bilde; Netlify-grensa er 6 MB per forespørsel
 
-const SYSTEM_PROMPT = `Du er en ekspert på 3D-printing med Bambu Lab P1S (med AMS) og Bambu Studio.
-Du får printerens oppsett, en beskrivelse fra brukeren og eventuelt et bilde av utskriften.
+const SYSTEM_PROMPT = `Du er en ekspert på FDM 3D-printing og kjenner alle vanlige printere (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Qidi, Sovol, Voron/Klipper m.fl.) og slicere (Bambu Studio, OrcaSlicer, PrusaSlicer, Cura, Creality Print).
+Du får brukerens printer, slicer, filament, dyse og byggeplate, en beskrivelse og eventuelt et bilde av utskriften.
+Tilpass rådene til akkurat den printeren og sliceren: bruk slicerens egne navn på innstillingene og menyene, og ta hensyn til om printeren har lukket kammer, direct drive eller bowden, auto-nivellering osv. Er modellen ukjent, gi råd som passer bredt og si hva som avhenger av printeren.
 Svar kort og konkret på norsk, i ren tekst uten markdown (ingen **, #, eller tabeller).
 Strukturer svaret slik:
 1. DIAGNOSE (1–2 setninger. Hvis bildet viser noe annet enn beskrivelsen, si det.)
-2. BAMBU STUDIO-INNSTILLINGER (eksakte verdier og hvor i Bambu Studio de ligger)
-3. FYSISK SJEKK PÅ P1S (f.eks. vask plata med oppvaskmiddel, AUX-vifte, rens dyse, tørk filament)
+2. SLICER-INNSTILLINGER (eksakte verdier og hvor i sliceren de ligger)
+3. FYSISK SJEKK PÅ PRINTEREN (f.eks. rengjør plata, kjøling, dyse, tørk filament, nivellering, beltestramming)
 Hvis bildet ikke viser en 3D-utskrift, eller du er usikker, si det heller enn å gjette.`;
 
 const CORS = {
@@ -58,6 +63,13 @@ const handler = async (req) => {
   }
 
   const { filament, nozzle, plate, image } = body || {};
+  // Eldre app-versjoner sender ikke printer/slicer – da antas Bambu Lab P1S.
+  const brand = body?.brand ?? 'Bambu Lab';
+  const slicer = body?.slicer ?? 'Bambu Studio';
+  const printerModel = typeof body?.model === 'string' ? body.model.trim() : body?.brand ? '' : 'P1S';
+  if (!ALLOWED.brand.includes(brand) || !ALLOWED.slicer.includes(slicer) || printerModel.length > MAX_MODEL_CHARS) {
+    return json({ error: 'Ugyldig valg av printer eller slicer.' }, 400);
+  }
   const problem = typeof body?.problem === 'string' ? body.problem.trim() : '';
 
   if (!ALLOWED.filament.includes(filament) || !ALLOWED.nozzle.includes(nozzle) || !ALLOWED.plate.includes(plate)) {
@@ -90,7 +102,8 @@ const handler = async (req) => {
   }
 
   const userText =
-    `Printer: Bambu Lab P1S med AMS. Filament: ${filament}. Dyse: ${nozzle}. Byggeplate: ${plate}.\n` +
+    `Printer: ${brand}${printerModel ? ' ' + printerModel : ' (modell ikke oppgitt)'}. Slicer: ${slicer}. ` +
+    `Filament: ${filament}. Dyse: ${nozzle}. Byggeplate: ${plate}.\n` +
     `Brukerens beskrivelse: ${problem || '(ingen – vurder bildet)'}`;
 
   const parts = [{ text: userText }];
