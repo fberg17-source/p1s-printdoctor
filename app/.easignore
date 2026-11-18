@@ -1,0 +1,6 @@
+# Som .gitignore, men .env skal være med i bygget (lages av GitHub Actions fra secrets)
+node_modules/
+.netlify/
+.expo/
+dist/
+*.log

@@ -25,6 +25,7 @@
         }
       ]
     ],
-    "icon": "./assets/icon.png"
+    "icon": "./assets/icon.png",
+    "owner": "graybeard"
   }
 }

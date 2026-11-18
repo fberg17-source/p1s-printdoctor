@@ -1,0 +1,91 @@
+# Bygger Android-appen på Expo (EAS) hver gang appen endres, eller når du trykker «Run workflow».
+# Krever to secrets i GitHub (Settings → Secrets and variables → Actions):
+#   EXPO_TOKEN  – access token fra expo.dev
+#   APP_TOKEN   – samme verdi som APP_TOKEN på Netlify
+name: Bygg Android-app
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'preview = APK til telefonen, production = AAB til Google Play'
+        default: preview
+        type: choice
+        options: [preview, production]
+  push:
+    branches: [main]
+    paths: ['app/**']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sjekk secrets
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+        run: |
+          [ -n "$EXPO_TOKEN" ] || { echo "::error::Mangler secret EXPO_TOKEN"; exit 1; }
+          [ -n "$APP_TOKEN" ] || { echo "::error::Mangler secret APP_TOKEN"; exit 1; }
+
+      - name: Lag .env for appen
+        env:
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+        run: |
+          echo "EXPO_PUBLIC_API_URL=https://p1s-printdoctor-graybeard.netlify.app/api/analyze" > .env
+          echo "EXPO_PUBLIC_APP_TOKEN=$APP_TOKEN" >> .env
+
+      - name: Installer
+        run: npm install --no-audit --no-fund
+
+      - name: Koble til Expo-prosjekt
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx --yes eas-cli@latest init --non-interactive --force
+
+      - name: Bygg på EAS
+        id: eas
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          npx --yes eas-cli@latest build --platform android --profile "$PROFILE" \
+            --non-interactive --wait --json > ../build.json
+          cat ../build.json
+
+      - name: Lagre nedlastingslenke i repoet
+        working-directory: .
+        run: |
+          URL=$(node -e "const b=JSON.parse(require('fs').readFileSync('build.json','utf8'));const x=Array.isArray(b)?b[0]:b;console.log(x.artifacts?.buildUrl||x.artifacts?.applicationArchiveUrl||'')")
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          mkdir -p builds
+          {
+            echo "# Siste Android-bygg"
+            echo
+            echo "- Tid: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- Profil: $PROFILE"
+            echo "- Commit: ${GITHUB_SHA::7}"
+            echo "- Nedlasting: $URL"
+          } > builds/LATEST.md
+          echo "Nedlasting: $URL" >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add builds/LATEST.md
+          git commit -m "Nytt Android-bygg ($PROFILE) [skip ci]" || exit 0
+          git pull --rebase origin main && git push
