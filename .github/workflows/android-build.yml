@@ -1,4 +1,4 @@
-# Bygger Android-appen på Expo (EAS) hver gang appen endres, eller når du trykker «Run workflow».
+# Bygger Android-appen med EAS lokalt på GitHub sin maskin (slipper Expo-køen) hver gang appen endres, eller når du trykker «Run workflow».
 # Krever to secrets i GitHub (Settings → Secrets and variables → Actions):
 #   EXPO_TOKEN  – access token fra expo.dev
 #   APP_TOKEN   – samme verdi som APP_TOKEN på Netlify
@@ -66,21 +66,42 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: npx --yes eas-cli@latest init --non-interactive --force
 
-      - name: Bygg på EAS
-        id: eas
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Bygg lokalt på GitHub (ingen Expo-kø)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          EXT=apk; [ "$PROFILE" = production ] && EXT=aab
           npx --yes eas-cli@latest build --platform android --profile "$PROFILE" \
-            --non-interactive --wait --json > ../build.json
-          cat ../build.json
+            --local --non-interactive --output "../PrintDoctor.$EXT"
+          ls -la ../PrintDoctor.$EXT
+
+      - name: Publiser som GitHub-release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          EXT=apk; [ "$PROFILE" = production ] && EXT=aab
+          TAG="build-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}"
+          gh release create "$TAG" "PrintDoctor.$EXT" \
+            --title "PrintDoctor $PROFILE $(date -u '+%d.%m.%Y %H:%M') UTC" \
+            --notes "Automatisk bygg fra commit ${GITHUB_SHA::7} (profil: $PROFILE)." --latest
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/PrintDoctor.$EXT"
+          echo "Nedlasting: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" > url.txt
 
       - name: Lagre nedlastingslenke i repoet
         working-directory: .
         run: |
-          URL=$(node -e "const b=JSON.parse(require('fs').readFileSync('build.json','utf8'));const x=Array.isArray(b)?b[0]:b;console.log(x.artifacts?.buildUrl||x.artifacts?.applicationArchiveUrl||'')")
+          URL=$(cat url.txt)
           PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          git checkout -- app
           mkdir -p builds
           {
             echo "# Siste Android-bygg"
@@ -89,9 +110,8 @@ jobs:
             echo "- Profil: $PROFILE"
             echo "- Commit: ${GITHUB_SHA::7}"
             echo "- Nedlasting: $URL"
+            echo "- Alltid nyeste APK: https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/PrintDoctor.apk"
           } > builds/LATEST.md
-          echo "Nedlasting: $URL" >> "$GITHUB_STEP_SUMMARY"
-          git checkout -- app   # eas init endrer app.json under bygget; ikke commit det
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add builds/LATEST.md
