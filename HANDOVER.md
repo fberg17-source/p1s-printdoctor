@@ -33,7 +33,7 @@ Netlify Function (backend/netlify/functions/analyze.mjs)
    │  sjekker token, gyldige valg, størrelse og dagsgrense
    │  prompten ligger her, ikke i appen
    ▼
-Google Gemini API (gemini-2.5-flash, kan endres med GEMINI_MODEL)
+Google Gemini API (gemini-flash-latest, kan endres med GEMINI_MODEL)
 ```
 
 **Sikkerhet**

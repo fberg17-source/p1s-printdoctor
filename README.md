@@ -34,7 +34,7 @@ Legg inn miljøvariabler. Det kan også gjøres i Netlify-panelet under Site con
 netlify env:set GEMINI_API_KEY "din-nye-nøkkel"
 netlify env:set APP_TOKEN "$(openssl rand -hex 32)"
 netlify env:set DAILY_LIMIT 200          # valgfri
-netlify env:set GEMINI_MODEL gemini-2.5-flash   # valgfri, bytt hvis Google har nyere modell
+netlify env:set GEMINI_MODEL gemini-flash-latest   # valgfri – "gemini-flash-latest" følger alltid nyeste Flash
 netlify deploy --prod
 ```
 

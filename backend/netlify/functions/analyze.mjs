@@ -4,7 +4,7 @@
 // Miljøvariabler (Netlify → Site configuration → Environment variables):
 //   GEMINI_API_KEY  – nøkkel fra aistudio.google.com/apikey (påkrevd)
 //   APP_TOKEN       – lang tilfeldig streng, samme som EXPO_PUBLIC_APP_TOKEN i appen (påkrevd)
-//   GEMINI_MODEL    – valgfri, standard "gemini-2.5-flash"
+//   GEMINI_MODEL    – valgfri, standard "gemini-flash-latest"
 //   DAILY_LIMIT     – valgfri, maks antall analyser per døgn totalt, standard 200
 
 import { getStore } from '@netlify/blobs';
@@ -87,7 +87,7 @@ export default async (req) => {
   const parts = [{ text: userText }];
   if (imagePart) parts.push(imagePart);
 
-  const model = Netlify.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
+  const model = Netlify.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
   let geminiRes;
