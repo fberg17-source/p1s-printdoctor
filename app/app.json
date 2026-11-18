@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "P1S PrintDoctor",
+    "slug": "p1s-printdoctor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#121212",
+    "android": {
+      "package": "no.graybeard.p1sprintdoctor",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#121212",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Appen bruker bilder av utskriftene dine for å analysere feil.",
+          "cameraPermission": "Appen bruker kameraet til å ta bilde av utskriften for analyse."
+        }
+      ]
+    ],
+    "icon": "./assets/icon.png"
+  }
+}

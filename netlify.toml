@@ -1,0 +1,5 @@
+# Netlify bygger bare backend-mappa (proxy til Gemini). Appen bygges på expo.dev.
+[build]
+  base = "backend"
+  publish = "public"
+  functions = "netlify/functions"

@@ -1,0 +1,8 @@
+{
+  "name": "p1s-printdoctor-api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "latest"
+  }
+}
