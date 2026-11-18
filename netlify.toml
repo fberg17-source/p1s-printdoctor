@@ -2,4 +2,4 @@
 [build]
   base = "backend"
   publish = "public"
-  functions = "netlify/functions"
+  edge_functions = "netlify/edge-functions"

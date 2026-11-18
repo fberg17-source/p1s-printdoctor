@@ -29,7 +29,7 @@ Telefon (Expo-app)
    │  POST /api/analyze   { filament, nozzle, plate, problem, image(base64 JPEG) }
    │  header x-app-token
    ▼
-Netlify Function (backend/netlify/functions/analyze.mjs)
+Netlify Function (backend/netlify/edge-functions/analyze.js (edge-funksjon, slipper 10 s-grensa))
    │  sjekker token, gyldige valg, størrelse og dagsgrense
    │  prompten ligger her, ikke i appen
    ▼
@@ -55,7 +55,7 @@ app/                          komplett Expo-prosjekt, SDK 58
   .env.example                EXPO_PUBLIC_API_URL og EXPO_PUBLIC_APP_TOKEN
   package.json, index.js, assets/
 backend/                      Netlify-site
-  netlify/functions/analyze.mjs
+  netlify/edge-functions/analyze.js (edge-funksjon, slipper 10 s-grensa)
   netlify.toml, package.json, public/index.html
 ```
 

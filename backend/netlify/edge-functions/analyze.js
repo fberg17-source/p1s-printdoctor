@@ -1,4 +1,4 @@
-// Netlify Function: proxy mellom P1S PrintDoctor-appen og Google Gemini.
+// Netlify Edge Function: proxy mellom P1S PrintDoctor-appen og Google Gemini.
 // API-nøkkelen ligger kun her (miljøvariabel GEMINI_API_KEY), aldri i appen.
 //
 // Miljøvariabler (Netlify → Site configuration → Environment variables):
@@ -8,6 +8,9 @@
 //   DAILY_LIMIT     – valgfri, maks antall analyser per døgn totalt, standard 200
 
 import { getStore } from '@netlify/blobs';
+
+// Edge-funksjon i stedet for vanlig funksjon: vanlige funksjoner stoppes etter 10 s på gratisplanen,
+// mens edge-funksjoner kan vente på Gemini så lenge svaret starter innen ca. 40 s.
 
 const ALLOWED = {
   filament: ['PLA', 'PETG', 'ABS / ASA', 'TPU', 'PAHT-CF'],
@@ -74,11 +77,17 @@ export default async (req) => {
 
   // Enkel dagsgrense for hele tjenesten, så en lekket token ikke kan gi en stor regning.
   const limit = Number(Netlify.env.get('DAILY_LIMIT') || 200);
-  const store = getStore('printdoctor-usage');
+  let store;
+  try { store = getStore('printdoctor-usage'); } catch { store = null; }
   const dayKey = new Date().toISOString().slice(0, 10);
-  const used = Number((await store.get(dayKey)) || 0);
-  if (used >= limit) return json({ error: 'Dagsgrensen er nådd. Prøv igjen i morgen.' }, 429);
-  await store.set(dayKey, String(used + 1));
+  try {
+    if (!store) throw new Error('ingen store');
+    const used = Number((await store.get(dayKey)) || 0);
+    if (used >= limit) return json({ error: 'Dagsgrensen er nådd. Prøv igjen i morgen.' }, 429);
+    await store.set(dayKey, String(used + 1));
+  } catch (e) {
+    console.error('Blobs-feil (dagsgrense hoppes over):', e?.message);
+  }
 
   const userText =
     `Printer: Bambu Lab P1S med AMS. Filament: ${filament}. Dyse: ${nozzle}. Byggeplate: ${plate}.\n` +
@@ -90,17 +99,26 @@ export default async (req) => {
   const model = Netlify.env.get('GEMINI_MODEL') || 'gemini-flash-latest';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
-  let geminiRes;
-  try {
-    geminiRes = await fetch(url, {
+  const callGemini = (withThinking) =>
+    fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [{ role: 'user', parts }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 4096,
+          // Lite "tenking" gir raskere svar. Faller tilbake uten hvis modellen ikke støtter det.
+          ...(withThinking ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
+        },
       }),
     });
+
+  let geminiRes;
+  try {
+    geminiRes = await callGemini(true);
+    if (geminiRes.status === 400) geminiRes = await callGemini(false);
   } catch {
     return json({ error: 'Fikk ikke kontakt med AI-tjenesten.' }, 502);
   }
